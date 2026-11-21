@@ -1295,7 +1295,53 @@ async function onPanelInvoke(channel, payload) {
   }
 }
 
-// ── 生命周期 ────────────────────────────────────────────────────────────────
+/**
+ * Renderer 徽章只读额度摘要：取各账号各窗口中「剩余最少」的值画圆环，
+ * 详情只回账号名 / 窗口标签 / 剩余百分比 / 重置时间 / 来源，绝不带令牌或邮箱。
+ */
+function ringSummary(snapshot) {
+  const accounts = Array.isArray(snapshot?.accounts) ? snapshot.accounts : [];
+  const rows = [];
+  let minRemaining = null;
+  for (const account of accounts) {
+    const windows = Array.isArray(account.windows) ? account.windows : [];
+    const details = [];
+    for (const window of windows) {
+      const remaining = num(window.remainingPercent);
+      if (remaining === null) continue;
+      const label =
+        (typeof window.customLabel === "string" && window.customLabel) ||
+        String(window.labelKey ?? window.period ?? "window").split(".").pop();
+      details.push({ label, remaining: round1(remaining), resetsAt: isoOrNull(window.resetsAt) });
+      if (minRemaining === null || remaining < minRemaining) minRemaining = remaining;
+    }
+    if (!details.length) continue;
+    rows.push({
+      label: typeof account.label === "string" && account.label ? account.label : account.provider || "订阅账号",
+      provider: account.provider || null,
+      status: account.status === "ok" ? "ok" : account.status === "error" ? "error" : "empty",
+      windows: details,
+    });
+  }
+  return {
+    remaining: minRemaining === null ? null : round1(minRemaining),
+    accounts: rows,
+    generatedAt: snapshot?.generatedAt ?? null,
+  };
+}
+
+/** renderer 扩展通过 plugin.call 调用；方法名已在 manifest.rendererCallMethods 白名单。 */
+async function onRendererCall(method) {
+  if (method === "quota.ring") {
+    try {
+      const snapshot = await buildSnapshot();
+      return { ok: true, ...ringSummary(snapshot) };
+    } catch (error) {
+      return { ok: false, error: errorMessage(error) };
+    }
+  }
+  throw Object.assign(new Error(`unknown renderer method: ${method}`), { code: "UNSUPPORTED" });
+}
 
 async function onLoad() {
   try {
@@ -1325,4 +1371,4 @@ async function onUnload() {
   }
 }
 
-module.exports = { onLoad, onUnload, onPanelInvoke };
+module.exports = { onLoad, onUnload, onPanelInvoke, onRendererCall };

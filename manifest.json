@@ -7,7 +7,7 @@
   "categories": [
     "productivity"
   ],
-  "changelog": "Release 0.5.0：新增 OpenCode Go 订阅额度查询。自动发现 OpenCode CLI 登录（~/.local/share/opencode/auth.json 的 opencode API Key）；面板「管理账号」新增 API Key 填写区（OpenCode Go / OpenRouter），也可在设置 credentials 手填；调用 opencode.ai/zen/go/v1/usage，按滚动 5 小时 / 每周 / 每月窗口显示剩余与重置倒计时。无 Go 订阅（404）时给出说明而非编造数字。新增 opencode.ai 域名白名单。",
+  "changelog": "Release 0.6.0：输入框右侧上下文圆环旁新增订阅额度圆环，显示剩余额度百分比，点击弹出各账号/窗口详情。renderer 扩展只读额度摘要，不回传令牌。Release 0.5.0：新增 OpenCode Go 订阅额度查询与面板 API Key 填写区。",
   "contributes": {
     "commands": [
       {
@@ -126,8 +126,12 @@
     "ui.view",
     "ui.panel",
     "net.fetch",
-    "shell.openExternal"
+    "shell.openExternal",
+    "renderer.extension"
   ],
+  "renderer": "renderer/quota-ring.mjs",
+  "rendererActions": ["plugin.call"],
+  "rendererCallMethods": ["quota.ring"],
   "safetyNotes": "插件 OAuth 多账号与手工令牌分别显示，CLI 自动发现仅作回退。优先级和额度推荐仅供手动切换，不控制宿主对话。不复用或读取 PI-Desktop 密钥库。OAuth 令牌由 Node fs 加密保存到本插件 getDataPath 目录（quota-oauth.enc）；本地密钥 quota-oauth.key 同目录保存，依赖系统文件权限，不等同系统钥匙串。登录期间 Node HTTP 仅监听 127.0.0.1:1455/53692，超时或结束关闭。令牌不写日志、不返回界面；联网走 net.fetch 白名单，shell.openExternal 仅打开服务商授权页。账号邮箱/用户名来自本地解析 OAuth 令牌、同源服务商接口（Claude /api/oauth/profile）与额度响应，不新增联网域名、不写日志。删除只清选中插件账号，不退出宿主/CLI，也不撤销服务商授权。",
   "schemaVersion": 1,
   "ui": {
@@ -139,5 +143,5 @@
     },
     "width": 540
   },
-  "version": "0.5.0"
+  "version": "0.6.0"
 }
