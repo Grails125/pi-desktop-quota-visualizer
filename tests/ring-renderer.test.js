@@ -1,43 +1,76 @@
 "use strict";
-// Smoke-test the renderer module: mount slot, fetch summary, render ring, click -> detail layer.
 const fs = require("node:fs");
 const path = require("node:path");
 const RENDERER = path.join(__dirname, "..", "renderer", "quota-ring.mjs");
 let pass = 0, fail = 0;
-const check = (n, c, x) => { if (c) { pass++; console.log("  PASS " + n); } else { fail++; console.log("  FAIL " + n + (x !== undefined ? " :: " + JSON.stringify(x) : "")); } };
+const check = (name, condition, extra) => {
+  if (condition) { pass++; console.log("  PASS " + name); }
+  else { fail++; console.log("  FAIL " + name + (extra !== undefined ? " :: " + JSON.stringify(extra) : "")); }
+};
 
 function node(tag) {
-  const n = {
-    tagName: (tag || "div").toUpperCase(), children: [], parentNode: null, attrs: {}, style: {},
-    className: "", textContent: "", listeners: {}, offsetHeight: 200,
+  const element = {
+    tagName: String(tag || "div").toUpperCase(), children: [], parentNode: null,
+    attrs: {}, style: {}, className: "", textContent: "", listeners: {},
+    offsetHeight: 200, isConnected: true, disabled: false,
     getBoundingClientRect() { return { left: 350, right: 380, top: 700, bottom: 728, width: 30, height: 28 }; },
-    append(...k) { for (const c of k) { if (c && typeof c === "object") { c.parentNode = n; n.children.push(c); } } },
-    appendChild(c) { n.append(c); return c; },
-    setAttribute(k, v) { n.attrs[k] = String(v); },
-    getAttribute(k) { return n.attrs[k] ?? null; },
-    addEventListener(t, fn) { (n.listeners[t] = n.listeners[t] || []).push(fn); },
-    removeEventListener(t, fn) { n.listeners[t] = (n.listeners[t] || []).filter((f) => f !== fn); },
-    contains(o) { let x = o; while (x) { if (x === n) return true; x = x.parentNode; } return false; },
-    click() { for (const fn of n.listeners.click || []) fn({ target: n }); },
+    append(...children) {
+      for (const child of children) {
+        if (child && typeof child === "object") { child.parentNode = element; element.children.push(child); }
+      }
+    },
+    appendChild(child) { element.append(child); return child; },
+    setAttribute(key, value) { element.attrs[key] = String(value); },
+    getAttribute(key) { return element.attrs[key] ?? null; },
+    addEventListener(type, listener) { (element.listeners[type] ||= []).push(listener); },
+    removeEventListener(type, listener) { element.listeners[type] = (element.listeners[type] || []).filter((fn) => fn !== listener); },
+    contains(other) { let current = other; while (current) { if (current === element) return true; current = current.parentNode; } return false; },
   };
-  return n;
+  return element;
 }
-global.document = { createElement: node, addEventListener() {}, removeEventListener() {}, body: node("body") };
+
+const documentListeners = new Map();
+global.document = {
+  createElement: node,
+  addEventListener(type, callback) { documentListeners.set(type, callback); },
+  removeEventListener(type, callback) { if (documentListeners.get(type) === callback) documentListeners.delete(type); },
+  body: node("body"),
+};
 global.window = global;
 global.innerWidth = 1200;
 global.innerHeight = 800;
+const windowListeners = new Map();
+global.addEventListener = (type, callback) => windowListeners.set(type, callback);
+global.removeEventListener = (type, callback) => { if (windowListeners.get(type) === callback) windowListeners.delete(type); };
 
-// React stub with a hook cursor reset before each render.
+let enabled = true;
+let selected = "Go";
+let onMutation = () => {};
+global.MutationObserver = class {
+  constructor(callback) { onMutation = callback; }
+  observe() {}
+  disconnect() { onMutation = () => {}; }
+};
+
 let stateQueue = [];
-let hookCursor = 0;
+let stateCursor = 0;
+let refCursor = 0;
 let effectQueue = [];
+const refs = [];
 const React = {
   useState(initial) {
-    const idx = hookCursor++;
-    if (idx >= stateQueue.length) stateQueue.push(initial);
-    return [stateQueue[idx], (value) => { stateQueue[idx] = value; }];
+    const index = stateCursor++;
+    if (index >= stateQueue.length) stateQueue.push(initial);
+    return [stateQueue[index], (value) => {
+      stateQueue[index] = typeof value === "function" ? value(stateQueue[index]) : value;
+    }];
   },
-  useEffect(fn) { effectQueue.push(fn); },
+  useRef(initial) {
+    const index = refCursor++;
+    if (!refs[index]) refs[index] = { current: initial };
+    return refs[index];
+  },
+  useEffect(callback) { effectQueue.push(callback); },
   createElement(type, props, ...children) { return { type, props: props || {}, children }; },
 };
 global.__PI_RENDERER_HOST__ = { react: React };
@@ -50,8 +83,8 @@ const pi = {
   ui: {
     injectStyle(css) { injectedCss = css; return () => {}; },
     openLayer() {
-      const el = node("div");
-      const layer = { element: el, closed: false, close() { layer.closed = true; } };
+      const element = node("div");
+      const layer = { element, closed: false, close() { layer.closed = true; } };
       layers.push(layer);
       return layer;
     },
@@ -61,11 +94,10 @@ const pi = {
   },
   dispatch: async (action, payload) => {
     dispatched.push({ action, payload });
+    if (!enabled) return { ok: true, enabled: false };
     return {
-      ok: true,
-      remaining: 88,
-      activeVendor: "opencode",
-      ring: { label: "5 小时额度", remaining: 88, resetsAt: new Date(Date.now() + 3600e3).toISOString(), accountLabel: "OpenCode Go", vendor: "opencode" },
+      ok: true, enabled: true, activeVendor: "opencode",
+      ring: { label: payload.args.modelLabel === "Go" ? "5 小时额度" : "周额度", remaining: payload.args.modelLabel === "Go" ? 88 : 35, resetsAt: new Date(Date.now() + 3600e3).toISOString(), accountLabel: "OpenCode Go", vendor: "opencode" },
       accounts: [{ label: "OpenCode Go", provider: "opencode", windows: [
         { label: "5 小时额度", remaining: 88, resetsAt: new Date(Date.now() + 3600e3).toISOString() },
         { label: "周额度", remaining: 20, resetsAt: new Date(Date.now() + 86400e3).toISOString() },
@@ -74,70 +106,90 @@ const pi = {
   },
 };
 
+function applyRefs(element) {
+  const ref = element?.props?.ref;
+  if (typeof ref === "function") ref({ closest: () => ({ querySelector: () => ({ textContent: selected }) }) });
+  for (const child of element?.children ?? []) applyRefs(child);
+}
+
 function render(component) {
-  hookCursor = 0;
+  stateCursor = 0;
+  refCursor = 0;
   effectQueue = [];
-  return component({ position: "right" });
+  const element = component({ position: "right" });
+  applyRefs(element);
+  return element;
 }
 
 async function loadModule() {
-  let source = fs.readFileSync(RENDERER, "utf8");
-  source = source.replace(/import React from "react";/, "const React = globalThis.__PI_RENDERER_HOST__.react;");
+  const source = fs.readFileSync(RENDERER, "utf8").replace(
+    /import React from "react";/,
+    "const React = globalThis.__PI_RENDERER_HOST__.react;",
+  );
   return import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
 }
 
 (async () => {
-  console.log("load renderer module");
   const mod = await loadModule();
-  check("exports onLoad", typeof mod.onLoad === "function");
-  check("exports onUnload", typeof mod.onUnload === "function");
-
-  console.log("onLoad");
+  check("exports onLoad/onUnload", typeof mod.onLoad === "function" && typeof mod.onUnload === "function");
   const dispose = mod.onLoad(pi);
-  check("style injected", typeof injectedCss === "string" && injectedCss.includes("quota-ring-svg"));
-  check("slot=composerControl", registered && registered.slot === "composerControl", registered && registered.slot);
-  check("positions=right (left of context ring)", registered && Array.isArray(registered.positions) && registered.positions.includes("right"), registered && registered.positions);
-  check("component is function", typeof registered?.component === "function");
+  check("style + slot", typeof injectedCss === "string" && registered?.slot === "composerControl" && registered.positions.includes("right"));
 
-  console.log("mount component (useEffect => dispatch)");
   let element = render(registered.component);
-  check("initial render null (no data yet)", element === null, element);
-  for (const fn of effectQueue) fn();
-  await new Promise((r) => setTimeout(r, 10));
+  const cleanup = effectQueue[0]();
+  await new Promise((resolve) => setTimeout(resolve, 10));
   element = render(registered.component);
-  check("dispatch called once", dispatched.length === 1, dispatched);
-  check("plugin.call + quota.ring", dispatched[0]?.action === "plugin.call" && dispatched[0]?.payload?.method === "quota.ring", dispatched[0]);
-  check("ring button rendered", !!element && element.type === "button", element && element.type);
-  check("data-level=ok (88%)", element?.props?.["data-level"] === "ok", element?.props?.["data-level"]);
-  check("aria-label has 88% + first window label", /88%/.test(element?.props?.["aria-label"] || "") && /5 小时额度/.test(element?.props?.["aria-label"] || ""), element?.props?.["aria-label"]);
-  const children = element?.children || [];
-  check("svg + value span", children.length === 2 && children[0].type === "svg" && children[1].type === "span", children.map((c) => c.type));
-  const progress = children[0]?.children?.[1];
-  check("progress circle has dasharray", !!progress?.props?.strokeDasharray, progress?.props);
+  check("ring rendered from first tier", element?.type === "button" && /5 小时额度剩余88%/.test(element.props["aria-label"]), element?.props?.["aria-label"]);
 
-  console.log("click -> detail layer");
-  // 传一个带 getBoundingClientRect 的 currentTarget，模拟真实点击锚点
-  element.props.onClick({ currentTarget: { getBoundingClientRect: () => ({ left: 350, right: 380, top: 700, bottom: 728 }) } });
-  await new Promise((r) => setTimeout(r, 10));
-  check("layer opened", layers.length === 1, layers.length);
-  const panel = layers[0]?.element?.children?.[0];
-  check("panel rendered", !!panel && panel.className === "quota-ring-panel", panel && panel.className);
-  const text = JSON.stringify(panel, (k, v) => (k === "parentNode" ? undefined : v));
-  check("shows OpenCode Go", text.includes("OpenCode Go"));
-  check("all Chinese labels: 5 小时额度 / 周额度", text.includes("5 小时额度") && text.includes("周额度"));
-  check("shows 剩余 20% and 88% (all windows)", text.includes("剩余 20%") && text.includes("剩余 88%"));
-  check("detail title Chinese", text.includes("订阅额度详情"));
-  check("no token in details", !text.includes("sk-"));
-  check("has close button", text.includes("qrp-close"));
-  // 浮窗锚定在圆环上方：top = 700 - 200 - 8 = 492，left = 380 - 340 = 40
-  check("panel anchored above ring (top < anchor top)", parseInt(panel.style.top) < 700, panel.style);
-  check("panel right edge near ring", Math.abs(parseInt(panel.style.left) + 340 - 380) <= 8, panel.style);
+  const anchor = { isConnected: true, getBoundingClientRect: () => ({ left: 350, right: 380, top: 700, bottom: 728 }) };
+  element.props.onPointerEnter({ currentTarget: anchor });
+  await new Promise((resolve) => setTimeout(resolve, 330));
+  const tip = layers.at(-1)?.element.children[0];
+  check("native tooltip copy", tip?.className === "ui-tooltip" && /5 小时额度剩余88%，.*后重置/.test(tip?.textContent || ""), tip?.textContent);
+  element.props.onPointerLeave();
 
-  console.log("dispose");
+  const pane = { getBoundingClientRect: () => ({ left: 240, right: 900 }) };
+  const ringAnchor = { getBoundingClientRect: () => ({ left: 350, right: 380, top: 700, bottom: 728 }), closest: () => pane, contains: () => false };
+  element.props.onClick({ currentTarget: ringAnchor });
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  let panel = layers.at(-1)?.element.children[0];
+  let text = JSON.stringify(panel, (key, value) => (key === "parentNode" ? undefined : value));
+  check("detail shows all subscriptions", text.includes("5 小时额度") && text.includes("周额度") && text.includes("剩余 20%"));
+  check("refresh replaces close", text.includes("qrp-refresh") && !text.includes("qrp-close"));
+  check("refresh note kept, tier note removed", text.includes("数据每 60 秒更新") && !text.includes("圆环显示当前模型订阅的第一档额度"));
+  check("native alignment", panel.style.left === "350px" && panel.style.top === "492px", panel.style);
+  check("countdown opacity", /\.qrp-reset\{[^}]*opacity:\.8/.test(injectedCss));
+
+  const refreshButton = panel.children[0].children.at(-1);
+  const before = dispatched.length;
+  refreshButton.listeners.click[0]();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  check("refresh requests force update", dispatched.length === before + 1 && dispatched.at(-1).payload.args.force === true, dispatched.slice(before));
+
+  documentListeners.get("keydown")({ key: "Escape" });
+  check("escape closes details", layers.at(-1).closed);
+  element.props.onClick({ currentTarget: ringAnchor });
+  check("click ring reopens details", layers.at(-1).closed === false);
+  documentListeners.get("pointerdown")({ target: node("div") });
+  check("outside click closes details", layers.at(-1).closed);
+  element.props.onClick({ currentTarget: ringAnchor });
+  element.props.onClick({ currentTarget: ringAnchor });
+  check("second ring click closes details", layers.at(-1).closed);
+
+  selected = "Claude";
+  onMutation();
+  await new Promise((resolve) => setTimeout(resolve, 220));
+  element = render(registered.component);
+  check("model change fetches matching quota", dispatched.at(-1).payload.args.modelLabel === "Claude" && /周额度剩余35%/.test(element.props["aria-label"]), element.props["aria-label"]);
+
+  enabled = false;
+  windowListeners.get("focus")();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  check("disabled hides ring", render(registered.component).props.hidden === true);
+
   dispose();
-  check("layer closed on dispose", layers.every((l) => l.closed), layers.map((l) => l.closed));
-  check("slot disposed", registered === null);
-
+  cleanup();
+  check("unload closes everything", registered === null && layers.every((layer) => layer.closed));
   console.log("\nRESULT: " + pass + " passed, " + fail + " failed");
   process.exit(fail ? 1 : 0);
-})().catch((e) => { console.error("SMOKE ERROR", e); process.exit(2); });
+})().catch((error) => { console.error("SMOKE ERROR", error); process.exit(2); });

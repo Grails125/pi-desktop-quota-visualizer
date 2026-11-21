@@ -7,7 +7,7 @@
   "categories": [
     "productivity"
   ],
-  "changelog": "Release 0.7.0：额度圆环按当前选中模型的订阅切换显示，圆环取该订阅的第一档额度窗口；详情浮窗锚定在圆环上方，文案中文化。Release 0.6.0：新增输入框旁额度圆环。Release 0.5.0：OpenCode Go。",
+  "changelog": "Release 0.7.3：悬浮文案改为具体档位名称与剩余额度；详情移除关闭按钮并改为刷新，保留刷新频率说明；详情关闭沿用原生上下文浮窗逻辑。",
   "contributes": {
     "commands": [
       {
@@ -29,6 +29,13 @@
       }
     ],
     "settings": [
+      {
+        "default": true,
+        "description": "在对话输入框旁显示订阅额度圆环。关闭不影响订阅额度面板。",
+        "key": "showComposerQuotaRing",
+        "title": "显示对话框额度圆环",
+        "type": "boolean"
+      },
       {
         "default": true,
         "description": "作为回退读取 Claude Code / Codex / Copilot / OpenCode 凭据文件。关闭后仍查询本插件授权和手工令牌账号。无需安装 CLI，可在面板的管理账号中单独登录。",
@@ -148,5 +155,5 @@
     },
     "width": 540
   },
-  "version": "0.7.0"
+  "version": "0.7.3"
 }

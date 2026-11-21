@@ -1,6 +1,6 @@
 {
   "name": "subscription-quota",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.7.3",
   "scripts": { "test": "node --test tests/*.test.js" }
 }

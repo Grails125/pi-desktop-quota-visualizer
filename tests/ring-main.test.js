@@ -16,8 +16,15 @@ const wait = () => new Promise((r) => setTimeout(r, 10));
 
 async function run() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ring-main-"));
-  const settings = { autoDetect: false, credentials: { opencode: "sk-secret-token-123" } };
-  let models = [{ isDefault: true, providerId: "opencode", providerName: "OpenCode", modelId: "go/latest" }];
+  const settings = { autoDetect: false, credentials: { opencode: "sk-secret-token-123" }, accounts: [
+    { provider: "anthropic", label: "Claude", windows: [{ period: "week", usedPercent: 65 }] },
+  ] };
+  const models = [
+    { isDefault: true, providerId: "opencode", modelId: "go/latest" },
+    { providerId: "anthropic", modelId: "claude-sonnet", alias: "Claude 工作" },
+    { providerId: "openrouter", modelId: "shared" },
+    { providerId: "opencode", modelId: "shared" },
+  ];
   global.pi = {
     plugin: { getSettings: async () => settings, setSettings: async (p) => Object.assign(settings, p), getDataPath: async () => tmp },
     net: { fetch: async (input) => input.url.includes("opencode.ai") ? { status: 200, bodyText: OPENCODE_USAGE } : { status: 401, bodyText: "{}" } },
@@ -29,7 +36,7 @@ async function run() {
   const mod = fresh();
 
   console.log("1) ring = first window of active model vendor");
-  let r = await mod.onRendererCall("quota.ring");
+  let r = await mod.onRendererCall("quota.ring", { modelLabel: "go/latest" });
   check("ok", r.ok === true, r);
   check("activeVendor=opencode", r.activeVendor === "opencode", r.activeVendor);
   check("remaining = first window 88 (not min 20)", r.remaining === 88, r.remaining);
@@ -40,22 +47,22 @@ async function run() {
   check("no token leaked", !JSON.stringify(r).includes("sk-secret-token-123"));
   check("no email leaked", !JSON.stringify(r).includes("email"));
   check("generatedAt", !!r.generatedAt);
+  check("ring setting defaults on", r.enabled === true);
 
-  console.log("2) switch model -> claude (no claude account) falls back to first available window");
-  models = [{ isDefault: true, providerId: "anthropic", providerName: "Anthropic", modelId: "claude-sonnet" }];
-  r = await mod.onRendererCall("quota.ring");
-  check("activeVendor=anthropic", r.activeVendor === "anthropic", r.activeVendor);
-  check("fallback remaining 88", r.remaining === 88, r.remaining);
-  check("detail still all accounts", r.accounts.length >= 1, r.accounts.length);
+  r = await mod.onRendererCall("quota.ring", { modelLabel: "Claude 工作" });
+  check("selected alias overrides unchanged default", r.activeVendor === "anthropic" && r.remaining === 35 && r.ring?.label === "周额度", r);
+  check("details still include both subscriptions", r.accounts.length === 2);
+  for (const modelLabel of ["shared", "unknown", ""]) {
+    r = await mod.onRendererCall("quota.ring", { modelLabel });
+    check(`no wrong quota for ${modelLabel || "missing label"}`, r.ring === null && r.accounts.length === 2, r);
+  }
 
-  console.log("3) models.list absent -> fallback");
-  const savedModels = global.pi.models;
-  delete global.pi.models;
-  r = await mod.onRendererCall("quota.ring");
-  check("ok", r.ok === true, r);
-  check("activeVendor null", r.activeVendor === null, r.activeVendor);
-  check("remaining 88", r.remaining === 88, r.remaining);
-  global.pi.models = savedModels;
+  settings.showComposerQuotaRing = false;
+  r = await mod.onRendererCall("quota.ring", { modelLabel: "go/latest" });
+  check("ring disabled without returning details", r.enabled === false && !r.accounts);
+  const snapshot = await mod.onPanelInvoke("quota.snapshot", {});
+  check("main panel still shows subscriptions", snapshot.accounts.length === 2);
+  settings.showComposerQuotaRing = true;
 
   console.log("4) unknown method rejects");
   let threw = false;
@@ -63,6 +70,7 @@ async function run() {
   check("throws", threw);
 
   console.log("5) no credentials -> empty");
+  settings.accounts = [];
   await mod.onPanelInvoke("quota.clearToken", { vendor: "opencode" });
   r = await mod.onRendererCall("quota.ring");
   check("ok", r.ok === true);

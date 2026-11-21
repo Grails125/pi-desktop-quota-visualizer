@@ -16,6 +16,7 @@ const CSS = `
   padding:0 2px;border-radius:var(--radius-full,999px);color:var(--ds-text-secondary);
   background:transparent;border:0;cursor:pointer;transition:background var(--motion-duration-fast,120ms) var(--motion-ease-out,ease),color var(--motion-duration-fast,120ms) var(--motion-ease-out,ease)}
 .quota-ring-btn:hover{background:var(--ds-bg-hover);color:var(--ds-text-primary)}
+.quota-ring-btn[hidden]{display:none}
 .quota-ring-btn:focus-visible{outline:2px solid var(--ds-accent);outline-offset:2px}
 .quota-ring-svg{width:17px;height:17px;overflow:visible;transform:rotate(-90deg)}
 .quota-ring-track,.quota-ring-progress{fill:none;stroke-width:2.5px}
@@ -25,22 +26,22 @@ const CSS = `
 .quota-ring-btn[data-level="ok"]{color:var(--ds-success,#3fb950)}
 .quota-ring-btn[data-level="warn"]{color:var(--ds-warning,#d29922)}
 .quota-ring-btn[data-level="low"]{color:var(--ds-danger,#f85149)}
-.quota-ring-panel{position:fixed;left:0;top:0;width:340px;max-width:calc(100vw - 24px);max-height:min(60vh,520px);
+.quota-ring-panel{position:fixed;left:0;top:0;width:340px;max-height:min(60vh,520px);
   overflow-y:auto;box-sizing:border-box;padding:16px;border-radius:var(--radius-md-plus,10px);
   border:1px solid var(--ds-border-default);background:var(--ds-bg-elevated-opaque,var(--ds-bg-elevated,#1e1e1e));
   color:var(--ds-text-primary);box-shadow:var(--ds-shadow-dialog,0 8px 28px rgba(0,0,0,.4));
   font-size:var(--text-xs,12px);line-height:var(--leading-body,1.5);z-index:1;text-align:left}
 .quota-ring-panel h4{margin:0 0 12px;font-size:var(--text-base,13px);display:flex;justify-content:space-between;align-items:baseline;gap:10px}
 .quota-ring-panel .qrp-context{color:var(--ds-text-secondary);font-size:var(--text-xxs,10px);font-weight:var(--font-weight-normal,400)}
-.quota-ring-panel button.qrp-close{border:0;background:transparent;color:var(--ds-text-secondary);cursor:pointer;font-size:16px;line-height:1;padding:2px 6px;border-radius:6px}
-.quota-ring-panel button.qrp-close:hover{background:var(--ds-bg-hover);color:var(--ds-text-primary)}
+.quota-ring-panel .qrp-refresh{border:1px solid var(--ds-border-default);border-radius:6px;background:transparent;color:var(--ds-text-secondary);cursor:pointer;padding:2px 8px;font-size:var(--text-xxs,10px)}
+.quota-ring-panel .qrp-refresh:hover{background:var(--ds-bg-hover);color:var(--ds-text-primary)}
 .qrp-account{margin:0 0 12px;padding-top:10px;border-top:1px solid var(--ds-border-default)}
 .qrp-account:first-of-type{border-top:0;padding-top:0}
 .qrp-name{font-weight:var(--font-weight-semibold,600);margin-bottom:6px;word-break:break-word}
 .qrp-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:5px 0}
 .qrp-row .qrp-label{color:var(--ds-text-secondary);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .qrp-row .qrp-val{font-variant-numeric:tabular-nums;font-weight:var(--font-weight-semibold,600);flex:none}
-.qrp-reset{color:var(--ds-text-tertiary,var(--ds-text-secondary));font-size:var(--text-xxs,10px);margin-left:6px}
+.qrp-reset{color:var(--ds-text-tertiary,var(--ds-text-secondary));font-size:var(--text-xxs,10px);margin-left:6px;opacity:.8}
 .qrp-empty{color:var(--ds-text-secondary);margin:0}
 .qrp-foot{margin-top:10px;color:var(--ds-text-tertiary,var(--ds-text-secondary));font-size:var(--text-xxs,10px)}
 `;
@@ -67,41 +68,78 @@ function resetText(iso) {
   return `${Math.floor(hours / 24)} 天后`;
 }
 
-/** 像上下文浮窗一样，把面板锚定在圆环按钮上方（空间不足时改到下方），并限制在视口内。 */
-function placePanel(panel, anchorRect) {
-  const vw = window.innerWidth || document.documentElement?.clientWidth || 0;
-  const vh = window.innerHeight || document.documentElement?.clientHeight || 0;
-  const width = Math.min(PANEL_WIDTH, Math.max(200, vw - 24));
+/** Match the context inspector: align left to the trigger within the chat pane. */
+function placePanel(panel, anchor, pane) {
+  const margin = 16, gap = 8;
+  const rect = anchor.getBoundingClientRect();
+  const bounds = pane?.getBoundingClientRect();
+  const leftEdge = (bounds?.left ?? 0) + margin;
+  const rightEdge = (bounds?.right ?? window.innerWidth) - margin;
+  const maxWidth = Math.floor(rightEdge - leftEdge);
+  if (maxWidth <= 0 || rect.bottom <= 0 || rect.top >= window.innerHeight) return false;
+  const width = Math.min(PANEL_WIDTH, maxWidth);
   panel.style.width = `${width}px`;
-  const height = panel.offsetHeight || Math.min(vh * 0.6, 320);
-  if (anchorRect) {
-    // 右边缘与圆环右边缘对齐，再向左展开，避免遮住右侧的上下文圆环。
-    let left = anchorRect.right - width;
-    left = Math.max(8, Math.min(left, vw - width - 8));
-    let top = anchorRect.top - height - 8; // 默认浮在圆环上方
-    if (top < 8) top = Math.min(anchorRect.bottom + 8, Math.max(8, vh - height - 8));
-    panel.style.left = `${left}px`;
-    panel.style.top = `${top}px`;
-  } else {
-    panel.style.left = `${Math.max(8, vw - width - 8)}px`;
-    panel.style.top = `${Math.max(8, vh - height - 100)}px`;
-  }
+  const height = panel.offsetHeight;
+  const above = rect.top - height - gap;
+  const below = rect.bottom + gap;
+  const bottomLimit = Math.max(margin, window.innerHeight - height - margin);
+  const top = above >= margin && above <= bottomLimit ? above : Math.min(Math.max(margin, below), bottomLimit);
+  panel.style.left = `${Math.min(Math.max(leftEdge, rect.left), rightEdge - width)}px`;
+  panel.style.top = `${top}px`;
+  return true;
 }
+
+let disposeRenderer;
 
 export function onLoad(pi) {
   const disposeStyle = pi.ui.injectStyle(CSS);
-  const layers = new Set();
-  let buttonEl = null;
+  let closeDetails = null;
+  let tooltip = null;
+  let tooltipTimer;
 
-  function closeAll() {
-    for (const layer of layers) layer.close();
-    layers.clear();
+  function hideTooltip() {
+    clearTimeout(tooltipTimer);
+    tooltip?.close();
+    tooltip = null;
   }
 
-  function showDetails(data, anchorRect) {
+  function showTooltip(anchor, text) {
+    hideTooltip();
+    if (!anchor || closeDetails) return;
+    tooltipTimer = setTimeout(() => {
+      if (!anchor.isConnected) return;
+      tooltip = pi.ui.openLayer();
+      const tip = document.createElement("span");
+      tip.className = "ui-tooltip";
+      tip.setAttribute("role", "tooltip");
+      tip.textContent = text;
+      tooltip.element.append(tip);
+      const rect = anchor.getBoundingClientRect();
+      const half = tip.offsetWidth / 2;
+      tip.style.left = `${Math.max(half + 8, Math.min(window.innerWidth - half - 8, rect.left + rect.width / 2))}px`;
+      tip.style.top = `${rect.top - 6}px`;
+    }, 300);
+  }
+
+  function closeAll() {
+    hideTooltip();
+    closeDetails?.();
+  }
+
+  function showDetails(data, anchor, onRefresh) {
     closeAll();
     const layer = pi.ui.openLayer();
-    layers.add(layer);
+    const pane = anchor.closest?.(".main-pane");
+    let observer;
+    closeDetails = () => {
+      document.removeEventListener("pointerdown", onOutside, true);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
+      observer?.disconnect();
+      layer.close();
+      closeDetails = null;
+    };
     const panel = document.createElement("div");
     panel.className = "quota-ring-panel";
     panel.setAttribute("role", "dialog");
@@ -118,16 +156,19 @@ export function onLoad(pi) {
       context.textContent = `${ring.accountLabel || ""} · ${ring.label || ""}`.replace(/^ · | · $/g, "");
       title.append(context);
     }
-    const close = document.createElement("button");
-    close.type = "button";
-    close.className = "qrp-close";
-    close.setAttribute("aria-label", "关闭");
-    close.textContent = "×";
-    close.addEventListener("click", () => {
-      layer.close();
-      layers.delete(layer);
+    const refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "qrp-refresh";
+    refresh.textContent = "刷新";
+    refresh.setAttribute("aria-label", "刷新订阅额度");
+    refresh.addEventListener("click", async () => {
+      refresh.disabled = true;
+      try { await onRefresh?.(true); }
+      finally {
+        if (refresh.isConnected) refresh.disabled = false;
+      }
     });
-    title.append(close);
+    title.append(refresh);
     panel.append(title);
 
     // 详情显示全部订阅。
@@ -171,60 +212,101 @@ export function onLoad(pi) {
 
     const foot = document.createElement("div");
     foot.className = "qrp-foot";
-    foot.textContent = "圆环显示当前模型订阅的第一档额度 · 数据每 60 秒更新";
+    foot.textContent = "数据每 60 秒更新";
     panel.append(foot);
-
     layer.element.append(panel);
-    placePanel(panel, anchorRect || buttonEl?.getBoundingClientRect?.());
-    const onOutside = (event) => {
-      if (!panel.contains(event.target)) {
-        layer.close();
-        layers.delete(layer);
-        document.removeEventListener("pointerdown", onOutside, true);
-      }
+    const reposition = () => {
+      if (anchor.isConnected === false || !placePanel(panel, anchor, pane)) closeDetails?.();
     };
-    setTimeout(() => document.addEventListener("pointerdown", onOutside, true), 0);
+    const onOutside = (event) => { if (!panel.contains(event.target) && !anchor.contains(event.target)) closeDetails?.(); };
+    const onKeyDown = (event) => { if (event.key === "Escape") closeDetails?.(); };
+    document.addEventListener("pointerdown", onOutside, true);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    if (pane && typeof ResizeObserver === "function") {
+      observer = new ResizeObserver(reposition);
+      observer.observe(pane);
+    }
+    reposition();
   }
 
   function QuotaRing() {
     const [data, setData] = React.useState(null);
+    const controls = React.useRef({ button: null, refresh: null });
 
     React.useEffect(() => {
+      const toolbar = controls.current.button?.closest(".composer-toolbar");
       let active = true;
-      const refresh = async () => {
+      let modelLabel;
+      let version = 0;
+      let delay;
+      const refresh = async (force = false) => {
+        const selected = toolbar?.querySelector(".composer-model-thinking-model")?.textContent?.trim() || "";
+        const request = ++version;
         try {
-          const result = await pi.dispatch("plugin.call", { method: "quota.ring", args: {} });
-          if (active && result?.ok) setData(result);
-        } catch {
-          /* 额度读取失败时隐藏圆环，不打扰对话 */
-        }
+          const result = await pi.dispatch("plugin.call", { method: "quota.ring", args: { modelLabel: selected, force } });
+          if (active && request === version && result?.ok) {
+            if (result.enabled === false) closeAll();
+            setData(result);
+          }
+        } catch { /* Keep the composer usable on request failure. */ }
       };
-      void refresh();
-      const timer = setInterval(() => void refresh(), POLL_MS);
+      const sync = (force = false) => {
+        const selected = toolbar?.querySelector(".composer-model-thinking-model")?.textContent?.trim() || "";
+        if (!force && selected === modelLabel) return;
+        clearTimeout(delay);
+        const changed = selected !== modelLabel;
+        controls.current.refresh = refresh;
+        modelLabel = selected;
+        if (changed) {
+          hideTooltip();
+          setData((previous) => previous ? { ...previous, ring: null } : null);
+        }
+        if (force) void refresh(force);
+        else delay = setTimeout(() => void refresh(), 180);
+      };
+      const observer = toolbar && typeof MutationObserver === "function" ? new MutationObserver(() => sync()) : null;
+      observer?.observe(toolbar, { childList: true, characterData: true, subtree: true });
+      sync(true);
+      const refreshOnFocus = () => sync(true);
+      window.addEventListener("focus", refreshOnFocus);
+      const timer = setInterval(refreshOnFocus, POLL_MS);
       return () => {
         active = false;
+        observer?.disconnect();
+        clearTimeout(delay);
         clearInterval(timer);
+        window.removeEventListener("focus", refreshOnFocus);
+        controls.current.refresh = null;
+        closeAll();
       };
     }, []);
-
-    // 圆环取第一档（主进程已按当前模型订阅选好），没有可用窗口则隐藏。
-    const first = data?.ring ?? null;
-    if (!first || typeof first.remaining !== "number") return null;
-
-    const remaining = clamp(first.remaining);
-    const percent = Math.round(remaining);
+    const first = data?.ring;
+    const known = Number.isFinite(first?.remaining);
+    const remaining = known ? clamp(first.remaining) : 0;
+    const percent = known ? `${remaining}%` : "—";
     const offset = CIRCUMFERENCE * (1 - remaining / 100);
-    const title = `${first.accountLabel || "订阅"} · ${first.label || "额度"}：剩余 ${percent}%（点击查看全部订阅）`;
+    const reset = resetText(first?.resetsAt);
+    const hint = known ? `${first.label || "订阅"}剩余${percent}，${!reset ? "重置时间未知" : reset === "即将重置" ? reset : `${reset}重置`}` : "当前模型暂无可用额度";
     return React.createElement(
       "button",
       {
         type: "button",
         className: "quota-ring-btn",
-        "data-level": level(remaining),
-        title,
-        "aria-label": title,
-        ref: (el) => { buttonEl = el; },
-        onClick: (event) => showDetails(data, event?.currentTarget?.getBoundingClientRect?.()),
+        hidden: data?.enabled === false,
+        "data-level": known ? level(remaining) : "unknown",
+        "aria-label": `${first?.accountLabel ? `${first.accountLabel}：` : ""}${hint}（点击查看全部订阅）`,
+        "aria-haspopup": "dialog",
+        ref: (el) => { controls.current.button = el; },
+        onPointerEnter: (event) => showTooltip(event.currentTarget, hint),
+        onPointerLeave: hideTooltip,
+        onFocus: (event) => showTooltip(event.currentTarget, hint),
+        onBlur: hideTooltip,
+        onClick: (event) => {
+          if (closeDetails) closeDetails();
+          else showDetails(data, event.currentTarget, (force) => controls.current.refresh?.(force));
+        },
       },
       React.createElement(
         "svg",
@@ -239,7 +321,7 @@ export function onLoad(pi) {
           strokeDashoffset: offset,
         }),
       ),
-      React.createElement("span", { className: "quota-ring-value" }, `${percent}%`),
+      React.createElement("span", { className: "quota-ring-value" }, percent),
     );
   }
 
@@ -249,13 +331,16 @@ export function onLoad(pi) {
     component: QuotaRing,
   });
 
-  return () => {
+  disposeRenderer = () => {
     closeAll();
     disposeSlot();
     disposeStyle();
   };
+  return onUnload;
 }
 
 export function onUnload() {
-  /* 所有注册与样式已由 onLoad 返回的 disposer 清理 */
+  const dispose = disposeRenderer;
+  disposeRenderer = null;
+  dispose?.();
 }

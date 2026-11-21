@@ -110,6 +110,7 @@ async function getSettings() {
   return {
     autoDetect: raw.autoDetect !== false,
     demoMode: raw.demoMode === true,
+    showComposerQuotaRing: raw.showComposerQuotaRing !== false,
     refreshSeconds,
     credentials: credentials && typeof credentials === "object" ? credentials : {},
     sources: Array.isArray(sources) ? sources : [],
@@ -1321,16 +1322,20 @@ const RING_WINDOW_LABELS = {
   other: "额度窗口",
 };
 
-/** 把 models.list 的当前（默认）模型映射到插件厂商 id。 */
-function vendorFromModels(value) {
-  const list = Array.isArray(value) ? value : Array.isArray(value?.models) ? value.models : Array.isArray(value?.data) ? value.data : [];
-  const active = list.find((m) => m?.isDefault) ?? list[0] ?? null;
-  if (!active) return null;
-  const text = [active.providerId, active.providerName, active.modelId, active.id, active.name]
-    .filter((v) => typeof v === "string").join(" ");
-  if (!text) return null;
-  for (const [vendor, pattern] of RING_VENDOR_PATTERNS) if (pattern.test(text)) return vendor;
-  return null;
+/** Match the visible composer label, never the globally configured default. */
+function vendorFromModels(value, label) {
+  if (typeof label !== "string" || label.length > 512 || !label.trim()) return null;
+  const list = Array.isArray(value) ? value : Array.isArray(value?.models) ? value.models : [];
+  const normalize = (text) => typeof text === "string" ? text.trim().toLowerCase() : "";
+  const matches = list.filter((model) => normalize(model?.alias || model?.modelId) === normalize(label));
+  const vendors = new Set(matches.map((model) => {
+    const id = normalize(model.providerId);
+    if (VENDORS.some((vendor) => vendor.id === id)) return id;
+    const name = normalize(model.providerName);
+    return RING_VENDOR_PATTERNS.find(([, pattern]) => pattern.test(id))?.[0]
+      ?? RING_VENDOR_PATTERNS.find(([, pattern]) => pattern.test(name))?.[0] ?? null;
+  }));
+  return vendors.size === 1 ? [...vendors][0] : null;
 }
 
 /** 与订阅额度面板一致的中文窗口标签。 */
@@ -1370,11 +1375,6 @@ function ringSummary(snapshot, activeVendor) {
       windows: details,
     });
   }
-  // 当前模型的订阅无额度时，回退到列表里第一个可用窗口。
-  if (!ring) {
-    const first = rows.find((row) => row.windows.length);
-    if (first) ring = { ...first.windows[0], accountLabel: first.label, vendor: first.provider };
-  }
   return {
     remaining: ring ? ring.remaining : null,
     ring,
@@ -1385,16 +1385,17 @@ function ringSummary(snapshot, activeVendor) {
 }
 
 /** renderer 扩展通过 plugin.call 调用；方法名已在 manifest.rendererCallMethods 白名单。 */
-async function onRendererCall(method) {
+async function onRendererCall(method, args) {
   if (method === "quota.ring") {
     try {
+      if (!(await getSettings()).showComposerQuotaRing) return { ok: true, enabled: false };
       const snapshot = await buildSnapshot();
       let models = null;
       try {
-        if (typeof pi?.models?.list === "function") models = await pi.models.list();
-      } catch { /* 取不到当前模型时回退到第一个订阅 */ }
-      const activeVendor = vendorFromModels(models);
-      return { ok: true, ...ringSummary(snapshot, activeVendor) };
+        if (typeof args?.modelLabel === "string" && args.modelLabel.length <= 512) models = await pi.models.list();
+      } catch { /* Keep details available even when the model catalog is unavailable. */ }
+      const activeVendor = vendorFromModels(models, args?.modelLabel);
+      return { ok: true, enabled: true, ...ringSummary(snapshot, activeVendor) };
     } catch (error) {
       return { ok: false, error: errorMessage(error) };
     }
