@@ -1295,25 +1295,72 @@ async function onPanelInvoke(channel, payload) {
   }
 }
 
-/**
- * Renderer 徽章只读额度摘要：取各账号各窗口中「剩余最少」的值画圆环，
- * 详情只回账号名 / 窗口标签 / 剩余百分比 / 重置时间 / 来源，绝不带令牌或邮箱。
- */
-function ringSummary(snapshot) {
+
+// ── 输入框额度圆环：只读摘要 ────────────────────────────────────────────────
+// 圆环按当前模型的订阅切换，取该订阅的第一档窗口；详情仍展示全部订阅。
+// 只回账号名 / 窗口标签 / 剩余百分比 / 重置时间，绝不带令牌或邮箱。
+
+const RING_VENDOR_PATTERNS = [
+  ["opencode", /opencode/i],
+  ["anthropic", /anthropic|claude/i],
+  ["openai-codex", /codex|chatgpt|openai|gpt-/i],
+  ["github-copilot", /copilot|github/i],
+  ["openrouter", /openrouter/i],
+  ["kimi-coding", /kimi/i],
+  ["meta", /meta|muse/i],
+  ["radius", /radius/i],
+  ["xai", /xai|grok/i],
+];
+
+const RING_WINDOW_LABELS = {
+  session: "5 小时额度",
+  day: "日额度",
+  week: "周额度",
+  month: "月额度",
+  credit: "额度余额",
+  other: "额度窗口",
+};
+
+/** 把 models.list 的当前（默认）模型映射到插件厂商 id。 */
+function vendorFromModels(value) {
+  const list = Array.isArray(value) ? value : Array.isArray(value?.models) ? value.models : Array.isArray(value?.data) ? value.data : [];
+  const active = list.find((m) => m?.isDefault) ?? list[0] ?? null;
+  if (!active) return null;
+  const text = [active.providerId, active.providerName, active.modelId, active.id, active.name]
+    .filter((v) => typeof v === "string").join(" ");
+  if (!text) return null;
+  for (const [vendor, pattern] of RING_VENDOR_PATTERNS) if (pattern.test(text)) return vendor;
+  return null;
+}
+
+/** 与订阅额度面板一致的中文窗口标签。 */
+function ringWindowLabel(window) {
+  if (typeof window.customLabel === "string" && window.customLabel.trim()) return window.customLabel.trim();
+  const key = typeof window.labelKey === "string" ? window.labelKey : window.period;
+  const text = String(key ?? "other");
+  return RING_WINDOW_LABELS[text] ?? RING_WINDOW_LABELS[text.split(".").pop()] ?? "额度窗口";
+}
+
+function ringSummary(snapshot, activeVendor) {
   const accounts = Array.isArray(snapshot?.accounts) ? snapshot.accounts : [];
   const rows = [];
-  let minRemaining = null;
+  let ring = null; // 当前模型对应订阅的第一档窗口
   for (const account of accounts) {
     const windows = Array.isArray(account.windows) ? account.windows : [];
     const details = [];
     for (const window of windows) {
       const remaining = num(window.remainingPercent);
       if (remaining === null) continue;
-      const label =
-        (typeof window.customLabel === "string" && window.customLabel) ||
-        String(window.labelKey ?? window.period ?? "window").split(".").pop();
-      details.push({ label, remaining: round1(remaining), resetsAt: isoOrNull(window.resetsAt) });
-      if (minRemaining === null || remaining < minRemaining) minRemaining = remaining;
+      const built = {
+        label: ringWindowLabel(window),
+        remaining: round1(remaining),
+        resetsAt: isoOrNull(window.resetsAt),
+      };
+      details.push(built);
+      // 只取该订阅的第一档窗口。
+      if (account.provider === activeVendor && !ring && details.length === 1) {
+        ring = { ...built, accountLabel: account.label || account.provider, vendor: account.provider };
+      }
     }
     if (!details.length) continue;
     rows.push({
@@ -1323,8 +1370,15 @@ function ringSummary(snapshot) {
       windows: details,
     });
   }
+  // 当前模型的订阅无额度时，回退到列表里第一个可用窗口。
+  if (!ring) {
+    const first = rows.find((row) => row.windows.length);
+    if (first) ring = { ...first.windows[0], accountLabel: first.label, vendor: first.provider };
+  }
   return {
-    remaining: minRemaining === null ? null : round1(minRemaining),
+    remaining: ring ? ring.remaining : null,
+    ring,
+    activeVendor: activeVendor ?? null,
     accounts: rows,
     generatedAt: snapshot?.generatedAt ?? null,
   };
@@ -1335,7 +1389,12 @@ async function onRendererCall(method) {
   if (method === "quota.ring") {
     try {
       const snapshot = await buildSnapshot();
-      return { ok: true, ...ringSummary(snapshot) };
+      let models = null;
+      try {
+        if (typeof pi?.models?.list === "function") models = await pi.models.list();
+      } catch { /* 取不到当前模型时回退到第一个订阅 */ }
+      const activeVendor = vendorFromModels(models);
+      return { ok: true, ...ringSummary(snapshot, activeVendor) };
     } catch (error) {
       return { ok: false, error: errorMessage(error) };
     }

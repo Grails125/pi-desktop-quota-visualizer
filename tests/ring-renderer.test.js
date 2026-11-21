@@ -9,7 +9,8 @@ const check = (n, c, x) => { if (c) { pass++; console.log("  PASS " + n); } else
 function node(tag) {
   const n = {
     tagName: (tag || "div").toUpperCase(), children: [], parentNode: null, attrs: {}, style: {},
-    className: "", textContent: "", listeners: {},
+    className: "", textContent: "", listeners: {}, offsetHeight: 200,
+    getBoundingClientRect() { return { left: 350, right: 380, top: 700, bottom: 728, width: 30, height: 28 }; },
     append(...k) { for (const c of k) { if (c && typeof c === "object") { c.parentNode = n; n.children.push(c); } } },
     appendChild(c) { n.append(c); return c; },
     setAttribute(k, v) { n.attrs[k] = String(v); },
@@ -23,6 +24,8 @@ function node(tag) {
 }
 global.document = { createElement: node, addEventListener() {}, removeEventListener() {}, body: node("body") };
 global.window = global;
+global.innerWidth = 1200;
+global.innerHeight = 800;
 
 // React stub with a hook cursor reset before each render.
 let stateQueue = [];
@@ -60,10 +63,12 @@ const pi = {
     dispatched.push({ action, payload });
     return {
       ok: true,
-      remaining: 20,
+      remaining: 88,
+      activeVendor: "opencode",
+      ring: { label: "5 小时额度", remaining: 88, resetsAt: new Date(Date.now() + 3600e3).toISOString(), accountLabel: "OpenCode Go", vendor: "opencode" },
       accounts: [{ label: "OpenCode Go", provider: "opencode", windows: [
-        { label: "session", remaining: 88, resetsAt: new Date(Date.now() + 3600e3).toISOString() },
-        { label: "week", remaining: 20, resetsAt: new Date(Date.now() + 86400e3).toISOString() },
+        { label: "5 小时额度", remaining: 88, resetsAt: new Date(Date.now() + 3600e3).toISOString() },
+        { label: "周额度", remaining: 20, resetsAt: new Date(Date.now() + 86400e3).toISOString() },
       ] }],
     };
   },
@@ -103,25 +108,30 @@ async function loadModule() {
   check("dispatch called once", dispatched.length === 1, dispatched);
   check("plugin.call + quota.ring", dispatched[0]?.action === "plugin.call" && dispatched[0]?.payload?.method === "quota.ring", dispatched[0]);
   check("ring button rendered", !!element && element.type === "button", element && element.type);
-  check("data-level=warn (20%)", element?.props?.["data-level"] === "warn", element?.props?.["data-level"]);
-  check("aria-label has 20%", /20%/.test(element?.props?.["aria-label"] || ""), element?.props?.["aria-label"]);
+  check("data-level=ok (88%)", element?.props?.["data-level"] === "ok", element?.props?.["data-level"]);
+  check("aria-label has 88% + first window label", /88%/.test(element?.props?.["aria-label"] || "") && /5 小时额度/.test(element?.props?.["aria-label"] || ""), element?.props?.["aria-label"]);
   const children = element?.children || [];
   check("svg + value span", children.length === 2 && children[0].type === "svg" && children[1].type === "span", children.map((c) => c.type));
   const progress = children[0]?.children?.[1];
   check("progress circle has dasharray", !!progress?.props?.strokeDasharray, progress?.props);
 
   console.log("click -> detail layer");
-  element.props.onClick();
+  // 传一个带 getBoundingClientRect 的 currentTarget，模拟真实点击锚点
+  element.props.onClick({ currentTarget: { getBoundingClientRect: () => ({ left: 350, right: 380, top: 700, bottom: 728 }) } });
   await new Promise((r) => setTimeout(r, 10));
   check("layer opened", layers.length === 1, layers.length);
   const panel = layers[0]?.element?.children?.[0];
   check("panel rendered", !!panel && panel.className === "quota-ring-panel", panel && panel.className);
   const text = JSON.stringify(panel, (k, v) => (k === "parentNode" ? undefined : v));
   check("shows OpenCode Go", text.includes("OpenCode Go"));
-  check("shows 剩余 20%", text.includes("剩余 20%"));
-  check("shows 剩余 88%", text.includes("剩余 88%"));
+  check("all Chinese labels: 5 小时额度 / 周额度", text.includes("5 小时额度") && text.includes("周额度"));
+  check("shows 剩余 20% and 88% (all windows)", text.includes("剩余 20%") && text.includes("剩余 88%"));
+  check("detail title Chinese", text.includes("订阅额度详情"));
   check("no token in details", !text.includes("sk-"));
   check("has close button", text.includes("qrp-close"));
+  // 浮窗锚定在圆环上方：top = 700 - 200 - 8 = 492，left = 380 - 340 = 40
+  check("panel anchored above ring (top < anchor top)", parseInt(panel.style.top) < 700, panel.style);
+  check("panel right edge near ring", Math.abs(parseInt(panel.style.left) + 340 - 380) <= 8, panel.style);
 
   console.log("dispose");
   dispose();

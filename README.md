@@ -4,9 +4,9 @@ PI-Desktop 工作面板插件：把订阅账号的剩余额度统一成「5 小�
 
 本仓库是 [czp0312/pi-desktop-quota-visualizer](https://github.com/czp0312/pi-desktop-quota-visualizer) 的改造版（fork），在原版基础上新增 **OpenCode Go 登录与额度查询**。原始作者与 MIT 许可保留见 [LICENSE](LICENSE)。
 
-## 相比原版的改动（v0.6.0）
+## 相比原版的改动（v0.7.0）
 
-- **输入框右侧额度圆环**：在上下文圆环左边显示所有窗口中剩余最少的一个，颜色按剩余量分级（绿/黄/红），点击弹出各账号各窗口的剩余与重置倒计时详情。仅需 `renderer.extension`，只读取额度摘要（账号名/窗口标签/剩余百分比/重置时间），不含令牌或邮箱，不发起网络请求。
+- **输入框右侧额度圆环**：在上下文圆环左边，按当前选中模型的订阅自动切换；圆环取该订阅的第一档额度窗口（5 小时 / 周 / 月…），颜色按剩余量分级（绿/黄/红）。点击浮窗锚定在圆环上方，显示全部订阅的中文详情（与订阅额度面板一致）。仅需 `renderer.extension` + `models.list`，只读取额度摘要（账号名/窗口标签/剩余百分比/重置时间），不含令牌或邮箱，不发起网络请求。
 - OpenCode Go 订阅额度查询：调用 `opencode.ai/zen/go/v1/usage`，按滚动 5 小时 / 每周 / 每月窗口显示剩余与重置倒计时。
 - 自动发现 OpenCode CLI 登录（`~/.local/share/opencode/auth.json` 的 `opencode` API Key，含 `XDG_DATA_HOME` 与 Windows 回退路径）。
 - 面板「管理账号」新增 **API Key 填写区**（OpenCode Go / OpenRouter）：密码框输入、保存 / 清除、配置状态提示；Key 写入插件设置 `credentials`，不回显、不写日志，保存后自动刷新额度。
@@ -26,7 +26,7 @@ PI-Desktop 工作面板插件：把订阅账号的剩余额度统一成「5 小�
 
 ## 安装
 
-- 从本仓库 [Releases](../../releases) 下载 `io.github.czp0312.subscription-quota-0.6.0.piplug`，在 PI-Desktop 中安装；或
+- 从本仓库 [Releases](../../releases) 下载 `io.github.czp0312.subscription-quota-0.7.0.piplug`，在 PI-Desktop 中安装；或
 - 将本目录整体复制到 `~/.pi-desktop/plugins/installed/io.github.czp0312.subscription-quota`，然后在 设置 → 扩展 中关闭再开启该插件（或重启 PI-Desktop）以重载 `main.js`。
 
 > 注意：`main.js` 只在插件加载时读入一次。仅重开面板不会生效，改动后需关闭再开启插件或重启宿主。
@@ -52,7 +52,7 @@ PI-Desktop 工作面板插件：把订阅账号的剩余额度统一成「5 小�
 npm test   # node --test tests/*.test.js（无需安装依赖，DOM 用内置 stub）
 ```
 
-测试覆盖（5 个文件 / 110 项断言）：OpenCode 窗口解析与凭据发现、API Key 通道（保存/清除/校验/不回显）、面板 DOM 交互冒烟、renderer 圆环挂载/轮询/点击详情、额度摘要不泄露令牌。
+测试覆盖（5 个文件 / 120 项断言）：OpenCode 窗口解析与凭据发现、API Key 通道（保存/清除/校验/不回显）、面板 DOM 交互冒烟、renderer 圆环挂载/轮询/点击详情、额度摘要不泄露令牌。
 
 ## 许可
 
